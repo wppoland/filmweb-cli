@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
 MEDIA_TYPES = {ValidTypes.FILM, ValidTypes.SERIAL, ValidTypes.GAME}
 VOD_TYPES = {ValidTypes.FILM, ValidTypes.SERIAL}
+UNSEEN_BUFFER = 10
 
 
 @click.group()
@@ -272,22 +273,24 @@ async def _find_unseen(  # noqa: PLR0913, PLR0917
     user_id, providers = await asyncio.gather(user_service.get_user_id(user_name), vod_service.get_vod_providers())
     provider = _match_vod_provider(providers, vod_name)
 
-    voted, film_ids = await asyncio.gather(
-        user_service.get_voted_ids(user_id),
-        vod_service.get_provider_film_ids(provider.id, start_year=since),
-    )
-    candidates = [film_id for film_id in film_ids if film_id not in voted]
+    voted = await user_service.get_voted_ids(user_id)
+    found: list[tuple[int, ContentRating]] = []
 
-    ratings = await asyncio.gather(*(info_service.get_content_rating(film_id) for film_id in candidates))
-    top = sorted(
-        (
+    # search hits come in rate order, so ratings are fetched batch by batch and the scan stops early
+    async for film_ids in vod_service.iter_provider_film_ids(provider.id, start_year=since, min_votes=min_votes):
+        candidates = [film_id for film_id in film_ids if film_id not in voted]
+        ratings = await asyncio.gather(*(info_service.get_content_rating(film_id) for film_id in candidates))
+        found += [
             (film_id, rating)
             for film_id, rating in zip(candidates, ratings, strict=True)
             if rating and rating.rate and (rating.count or 0) >= min_votes
-        ),
-        key=lambda item: item[1].rate or 0,
-        reverse=True,
-    )[:limit]
+        ]
+        # ponytail: the search index rate lags the live rate (measured up to 0.012), so scan
+        # UNSEEN_BUFFER films past the limit before resorting by live rate; raise it if order drifts
+        if len(found) >= limit + UNSEEN_BUFFER:
+            break
+
+    top = sorted(found, key=lambda item: item[1].rate or 0, reverse=True)[:limit]
 
     infos = await asyncio.gather(*(info_service.get_title_info(film_id) for film_id, _ in top))
 
