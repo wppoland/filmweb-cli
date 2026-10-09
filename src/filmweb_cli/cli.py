@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
 MEDIA_TYPES = {ValidTypes.FILM, ValidTypes.SERIAL, ValidTypes.GAME}
 VOD_TYPES = {ValidTypes.FILM, ValidTypes.SERIAL}
+UNSEEN_BUFFER = 10
 
 
 @click.group()
@@ -303,28 +304,33 @@ async def _find_unseen(
     )
     provider_ids = [_match_vod_provider(providers, name).id for name in filters.vod_names]
 
-    voted, film_ids = await asyncio.gather(
-        user_service.get_voted_ids(user_id, filters.entity_name),
-        vod_service.get_provider_title_ids(
-            provider_ids,
-            entity_name=filters.entity_name,
-            start_year=filters.since,
-            end_year=filters.until,
-            genre_ids=genre_ids,
-        ),
+    voted = await user_service.get_voted_ids(user_id, filters.entity_name)
+    title_batches = vod_service.iter_provider_title_ids(
+        provider_ids,
+        entity_name=filters.entity_name,
+        start_year=filters.since,
+        end_year=filters.until,
+        genre_ids=genre_ids,
+        min_votes=min_votes,
     )
-    candidates = [film_id for film_id in film_ids if film_id not in voted]
+    found: list[tuple[int, ContentRating]] = []
 
-    ratings = await asyncio.gather(*(info_service.get_content_rating(film_id) for film_id in candidates))
-    top = sorted(
-        (
-            (film_id, rating)
-            for film_id, rating in zip(candidates, ratings, strict=True)
+    # search hits come in rate order, so ratings are fetched batch by batch and the scan stops early
+    async for title_ids in title_batches:
+        candidates = list(dict.fromkeys(title_id for title_id in title_ids if title_id not in voted))
+        voted.update(candidates)  # a title listed by several providers must not show up twice
+        ratings = await asyncio.gather(*(info_service.get_content_rating(title_id) for title_id in candidates))
+        found += [
+            (title_id, rating)
+            for title_id, rating in zip(candidates, ratings, strict=True)
             if rating and rating.rate and (rating.count or 0) >= min_votes
-        ),
-        key=lambda item: item[1].rate or 0,
-        reverse=True,
-    )[:limit]
+        ]
+        # ponytail: the search index rate lags the live rate (measured up to 0.012), so scan
+        # UNSEEN_BUFFER titles past the limit before resorting by live rate; raise it if order drifts
+        if len(found) >= limit + UNSEEN_BUFFER:
+            break
+
+    top = sorted(found, key=lambda item: item[1].rate or 0, reverse=True)[:limit]
 
     infos = await asyncio.gather(*(info_service.get_title_info(film_id) for film_id, _ in top))
 
