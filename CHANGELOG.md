@@ -1,10 +1,15 @@
-## [Unreleased]
+## [1.2.0]
 
 ### Added
 
-- **Unseen films** - `filmweb unseen USER --vod PROVIDER` lists top-rated films on a VOD platform that the user has not rated, with `--since`, `--min-votes` and `--limit` filters
+- **Unseen films** - `filmweb unseen USER --vod PROVIDER` lists top-rated films on a VOD platform that the user has not rated, with `--since`, `--min-votes` and `--limit` filters (#1)
 - **Unseen filters** - `--until YEAR`, repeatable `--genre` (Polish or English name, any match), repeatable `--vod`, and `--type serial` for series
 - **Logged-in session** - optional `FILMWEB_COOKIE` env var, needed to read more than 100 user votes
+
+### Changed
+
+- **Faster unseen** - the search filters by vote count on the server, reads pages in rate order and stops once enough titles are found (Netflix since 2011: about 35 s down to 3 s)
+- **Request limit** - at most 10 requests to Filmweb run at once
 
 ## [1.1.0]
 
