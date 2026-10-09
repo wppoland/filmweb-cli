@@ -52,3 +52,10 @@ class SeriesInfo(ContentInfo):
 
 class GameInfo(ContentInfo):
     entity_name: Literal["videogame"] = Field(alias="entityName")
+
+
+class TitleInfo(BaseModel):  # not all information from api response is parsed here
+    id: int
+    title: str
+    original_title: str | None = Field(default=None, alias="originalTitle")
+    year: int | None = None

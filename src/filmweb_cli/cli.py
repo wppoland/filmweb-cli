@@ -9,14 +9,24 @@ from .display.content_preview import print_content_preview
 from .display.people_preview import print_person_preview
 from .display.search import print_search_results
 from .display.top_roles_preview import print_top_roles_preview
+from .display.unseen import print_unseen
 from .display.vod import print_where_to_watch, print_where_to_watch_compact
 from .display.worlds_preview import print_world_preview
-from .exceptions.exceptions import ContentNotFoundError, InvalidContentError, InvalidIdPrefixError, InvalidIdTypeError
+from .exceptions.exceptions import (
+    ContentNotFoundError,
+    FilmwebError,
+    InvalidContentError,
+    InvalidIdPrefixError,
+    InvalidIdTypeError,
+)
 from .filmweb_types import ValidTypes
-from .schemas.vod.vod_providers import WhereToWatch
+from .schemas.info.content_info import TitleInfo
+from .schemas.info.rating import ContentRating
+from .schemas.vod.vod_providers import VodProvider, WhereToWatch
 from .services.info_service import InfoService
 from .services.ranking_service import RankingService
 from .services.search_service import SearchService
+from .services.user_service import UserService
 from .services.vod_service import VodService
 
 if TYPE_CHECKING:
@@ -221,6 +231,81 @@ def show_top_roles(client: FilmwebClient, content_id: str) -> None:
     except InvalidContentError as e:
         click.echo(e, err=True)
         raise SystemExit(1) from e
+
+
+@main.command("unseen")
+@click.argument("user_name")
+@click.option("--vod", "vod_name", required=True, help="VOD provider name or id, e.g. 'Apple TV' or netflix")
+@click.option("--since", type=int, help="Earliest production year")
+@click.option("--min-votes", type=int, default=1000, show_default=True, help="Minimum number of community votes")
+@click.option("--limit", type=int, default=20, show_default=True, help="Number of films to show")
+@click.pass_obj
+def show_unseen(  # noqa: PLR0913, PLR0917
+    client: FilmwebClient,
+    user_name: str,
+    vod_name: str,
+    since: int | None,
+    min_votes: int,
+    limit: int,
+) -> None:
+    try:
+        films = asyncio.run(_find_unseen(client, user_name, vod_name, since, min_votes, limit))
+    except FilmwebError as e:
+        click.echo(e, err=True)
+        raise SystemExit(1) from e
+
+    print_unseen(films)
+
+
+async def _find_unseen(  # noqa: PLR0913, PLR0917
+    client: FilmwebClient,
+    user_name: str,
+    vod_name: str,
+    since: int | None,
+    min_votes: int,
+    limit: int,
+) -> list[tuple[TitleInfo, ContentRating]]:
+    user_service = UserService(client)
+    vod_service = VodService(client)
+    info_service = InfoService(client)
+
+    user_id, providers = await asyncio.gather(user_service.get_user_id(user_name), vod_service.get_vod_providers())
+    provider = _match_vod_provider(providers, vod_name)
+
+    voted, film_ids = await asyncio.gather(
+        user_service.get_voted_ids(user_id),
+        vod_service.get_provider_film_ids(provider.id, start_year=since),
+    )
+    candidates = [film_id for film_id in film_ids if film_id not in voted]
+
+    ratings = await asyncio.gather(*(info_service.get_content_rating(film_id) for film_id in candidates))
+    top = sorted(
+        (
+            (film_id, rating)
+            for film_id, rating in zip(candidates, ratings, strict=True)
+            if rating and rating.rate and (rating.count or 0) >= min_votes
+        ),
+        key=lambda item: item[1].rate or 0,
+        reverse=True,
+    )[:limit]
+
+    infos = await asyncio.gather(*(info_service.get_title_info(film_id) for film_id, _ in top))
+
+    return [(info, rating) for info, (_, rating) in zip(infos, top, strict=True)]
+
+
+def _match_vod_provider(providers: list[VodProvider], vod_name: str) -> VodProvider:
+    def normalize(value: str) -> str:
+        return value.lower().replace(" ", "").replace("_", "").replace("+", "plus")
+
+    wanted = normalize(vod_name)
+    for provider in providers:
+        if wanted in {str(provider.id), normalize(provider.name), normalize(provider.display_name)}:
+            return provider
+
+    available = ", ".join(sorted(p.display_name for p in providers))
+    msg = f"Unknown VOD provider: {vod_name}. Available: {available}"
+    raise InvalidContentError(msg)
 
 
 def _parse_content_input(content_id: str) -> tuple[ValidTypes, int]:
