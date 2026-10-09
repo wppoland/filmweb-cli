@@ -3,6 +3,7 @@
 ### Added
 
 - **Unseen films** - `filmweb unseen USER --vod PROVIDER` lists top-rated films on a VOD platform that the user has not rated, with `--since`, `--min-votes` and `--limit` filters
+- **Unseen filters** - `--until YEAR`, repeatable `--genre` (Polish or English name, any match), repeatable `--vod`, and `--type serial` for series
 - **Logged-in session** - optional `FILMWEB_COOKIE` env var, needed to read more than 100 user votes
 
 ## [1.1.0]

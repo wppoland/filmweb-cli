@@ -126,15 +126,26 @@ filmweb top 10094250
 
 ### Unseen Films
 
-Find well-rated films on a VOD platform that a Filmweb user has not rated yet:
+Find well-rated films or series on VOD platforms that a Filmweb user has not rated yet:
 
 ```bash
 # Apple TV films produced since 2011, at least 1000 community votes, top 20
 filmweb unseen fsiun --vod "Apple TV" --since 2011
+
+# Comedies or dramas from 2015 to 2020 on Netflix or Apple TV
+filmweb unseen fsiun --vod netflix --vod "Apple TV" --genre komedia --genre drama --since 2015 --until 2020
+
+# Series instead of films
+filmweb unseen fsiun --vod "Apple TV" --type serial
 ```
 
-Options: `--vod` (provider name or id, required), `--since` (earliest production year),
-`--min-votes` (default 1000), `--limit` (default 20).
+Options:
+- `--vod`: provider name or id, required, repeat to search several providers at once
+- `--since` / `--until`: earliest / latest production year (for series Filmweb matches any year the series was on air)
+- `--genre`: Polish or English genre name, or genre id, repeat to match any of them; an unknown name lists the available genres
+- `--type`: `film` (default) or `serial`
+- `--min-votes`: minimum community votes (default 1000)
+- `--limit`: number of titles to show (default 20)
 
 Filmweb returns only the first 100 votes of a user without a login. For accounts with more votes,
 set `FILMWEB_COOKIE` to the `JWT` cookie of a logged-in browser session (DevTools, Application, Cookies).
