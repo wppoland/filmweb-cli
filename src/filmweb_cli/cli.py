@@ -1,4 +1,5 @@
 import asyncio
+import unicodedata
 from typing import TYPE_CHECKING, NamedTuple
 
 import click
@@ -243,8 +244,8 @@ def show_top_roles(client: FilmwebClient, content_id: str) -> None:
     multiple=True,
     help="VOD provider name or id, e.g. 'Apple TV' or netflix. Repeat for several providers",
 )
-@click.option("--since", type=int, help="Earliest production year")
-@click.option("--until", type=int, help="Latest production year")
+@click.option("--since", type=int, help="Earliest production year (series: first aired)")
+@click.option("--until", type=int, help="Latest production year (series: first aired)")
 @click.option("--genre", "genre_names", multiple=True, help="Genre name (Polish or English) or id. Repeat to match any")
 @click.option(
     "--type",
@@ -254,8 +255,14 @@ def show_top_roles(client: FilmwebClient, content_id: str) -> None:
     show_default=True,
     help="Content type",
 )
-@click.option("--min-votes", type=int, default=1000, show_default=True, help="Minimum number of community votes")
-@click.option("--limit", type=int, default=20, show_default=True, help="Number of titles to show")
+@click.option(
+    "--min-votes",
+    type=click.IntRange(min=0),
+    default=1000,
+    show_default=True,
+    help="Minimum number of community votes",
+)
+@click.option("--limit", type=click.IntRange(min=1), default=20, show_default=True, help="Number of titles to show")
 @click.pass_obj
 def show_unseen(  # noqa: PLR0913, PLR0917
     client: FilmwebClient,
@@ -268,6 +275,10 @@ def show_unseen(  # noqa: PLR0913, PLR0917
     min_votes: int,
     limit: int,
 ) -> None:
+    if since and until and since > until:
+        msg = f"--since ({since}) is later than --until ({until})"
+        raise click.UsageError(msg)
+
     filters = UnseenFilters(vod_names, since, until, genre_names, entity_name)
     try:
         films = asyncio.run(_find_unseen(client, user_name, filters, min_votes, limit))
@@ -319,6 +330,10 @@ async def _find_unseen(
     async for title_ids in title_batches:
         candidates = list(dict.fromkeys(title_id for title_id in title_ids if title_id not in voted))
         voted.update(candidates)  # a title listed by several providers must not show up twice
+        if filters.entity_name == "serial" and (filters.since or filters.until):
+            # the search matches any year a series was on air, keep only series first aired in range
+            infos = await asyncio.gather(*(info_service.get_title_info(title_id) for title_id in candidates))
+            candidates = [info.id for info in infos if _year_in_range(info.year, filters.since, filters.until)]
         ratings = await asyncio.gather(*(info_service.get_content_rating(title_id) for title_id in candidates))
         found += [
             (title_id, rating)
@@ -337,20 +352,30 @@ async def _find_unseen(
     return [(info, rating) for info, (_, rating) in zip(infos, top, strict=True)]
 
 
+def _year_in_range(year: int | None, since: int | None, until: int | None) -> bool:
+    return year is not None and (since is None or year >= since) and (until is None or year <= until)
+
+
+def _fold(value: str) -> str:
+    # lowercase and strip Polish diacritics, so "kryminal" matches the Polish genre name
+    decomposed = unicodedata.normalize("NFKD", value.lower().replace("ł", "l"))
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
 async def _resolve_genres(vod_service: VodService, genre_names: tuple[str, ...]) -> list[int]:
     if not genre_names:
         return []
 
     polish, english = await asyncio.gather(vod_service.get_genres(), vod_service.get_genres("en_US"))
-    by_name = {str(g.id): g.id for g in polish} | {g.name.text.lower(): g.id for g in (*polish, *english)}
+    by_name = {str(g.id): g.id for g in polish} | {_fold(g.name.text): g.id for g in (*polish, *english)}
 
-    unknown = [name for name in genre_names if name.lower() not in by_name]
+    unknown = [name for name in genre_names if _fold(name) not in by_name]
     if unknown:
         available = ", ".join(sorted(g.name.text for g in polish))
         msg = f"Unknown genre: {', '.join(unknown)}. Available: {available}"
         raise InvalidContentError(msg)
 
-    return [by_name[name.lower()] for name in genre_names]
+    return [by_name[_fold(name)] for name in genre_names]
 
 
 def _match_vod_provider(providers: list[VodProvider], vod_name: str) -> VodProvider:
