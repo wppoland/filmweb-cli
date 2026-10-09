@@ -44,3 +44,6 @@ lint.ignore = [
   "CPY001",
 ]
 preview = true
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["INP001", "PLC2701", "PT009", "PT027"] # stdlib unittest, no pytest

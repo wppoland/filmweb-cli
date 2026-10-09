@@ -27,6 +27,7 @@ jobs:
           pip install -r ./requirements/typing.txt -r ./requirements/base.txt
           ruff check .
           pyrefly check .
+          PYTHONPATH=src python -m unittest discover -s tests
 
   taplo:
     runs-on: ubuntu-latest

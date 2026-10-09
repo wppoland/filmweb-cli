@@ -203,6 +203,12 @@ ruff check src/
 pyrefly check src/
 ```
 
+Run tests (offline, stdlib unittest):
+
+```bash
+PYTHONPATH=src python -m unittest discover -s tests
+```
+
 ## Disclaimer
 
 This is an unofficial project and is not affiliated with Filmweb.pl.
