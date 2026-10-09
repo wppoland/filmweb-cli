@@ -1,5 +1,5 @@
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import click
 
@@ -36,6 +36,7 @@ if TYPE_CHECKING:
 
 MEDIA_TYPES = {ValidTypes.FILM, ValidTypes.SERIAL, ValidTypes.GAME}
 VOD_TYPES = {ValidTypes.FILM, ValidTypes.SERIAL}
+UNSEEN_BUFFER = 10
 
 
 @click.group()
@@ -235,21 +236,41 @@ def show_top_roles(client: FilmwebClient, content_id: str) -> None:
 
 @main.command("unseen")
 @click.argument("user_name")
-@click.option("--vod", "vod_name", required=True, help="VOD provider name or id, e.g. 'Apple TV' or netflix")
+@click.option(
+    "--vod",
+    "vod_names",
+    required=True,
+    multiple=True,
+    help="VOD provider name or id, e.g. 'Apple TV' or netflix. Repeat for several providers",
+)
 @click.option("--since", type=int, help="Earliest production year")
+@click.option("--until", type=int, help="Latest production year")
+@click.option("--genre", "genre_names", multiple=True, help="Genre name (Polish or English) or id. Repeat to match any")
+@click.option(
+    "--type",
+    "entity_name",
+    type=click.Choice(["film", "serial"]),
+    default="film",
+    show_default=True,
+    help="Content type",
+)
 @click.option("--min-votes", type=int, default=1000, show_default=True, help="Minimum number of community votes")
-@click.option("--limit", type=int, default=20, show_default=True, help="Number of films to show")
+@click.option("--limit", type=int, default=20, show_default=True, help="Number of titles to show")
 @click.pass_obj
 def show_unseen(  # noqa: PLR0913, PLR0917
     client: FilmwebClient,
     user_name: str,
-    vod_name: str,
+    vod_names: tuple[str, ...],
     since: int | None,
+    until: int | None,
+    genre_names: tuple[str, ...],
+    entity_name: str,
     min_votes: int,
     limit: int,
 ) -> None:
+    filters = UnseenFilters(vod_names, since, until, genre_names, entity_name)
     try:
-        films = asyncio.run(_find_unseen(client, user_name, vod_name, since, min_votes, limit))
+        films = asyncio.run(_find_unseen(client, user_name, filters, min_votes, limit))
     except FilmwebError as e:
         click.echo(e, err=True)
         raise SystemExit(1) from e
@@ -257,11 +278,18 @@ def show_unseen(  # noqa: PLR0913, PLR0917
     print_unseen(films)
 
 
-async def _find_unseen(  # noqa: PLR0913, PLR0917
+class UnseenFilters(NamedTuple):
+    vod_names: tuple[str, ...]
+    since: int | None
+    until: int | None
+    genre_names: tuple[str, ...]
+    entity_name: str
+
+
+async def _find_unseen(
     client: FilmwebClient,
     user_name: str,
-    vod_name: str,
-    since: int | None,
+    filters: UnseenFilters,
     min_votes: int,
     limit: int,
 ) -> list[tuple[TitleInfo, ContentRating]]:
@@ -269,29 +297,60 @@ async def _find_unseen(  # noqa: PLR0913, PLR0917
     vod_service = VodService(client)
     info_service = InfoService(client)
 
-    user_id, providers = await asyncio.gather(user_service.get_user_id(user_name), vod_service.get_vod_providers())
-    provider = _match_vod_provider(providers, vod_name)
-
-    voted, film_ids = await asyncio.gather(
-        user_service.get_voted_ids(user_id),
-        vod_service.get_provider_film_ids(provider.id, start_year=since),
+    user_id, providers, genre_ids = await asyncio.gather(
+        user_service.get_user_id(user_name),
+        vod_service.get_vod_providers(),
+        _resolve_genres(vod_service, filters.genre_names),
     )
-    candidates = [film_id for film_id in film_ids if film_id not in voted]
+    provider_ids = [_match_vod_provider(providers, name).id for name in filters.vod_names]
 
-    ratings = await asyncio.gather(*(info_service.get_content_rating(film_id) for film_id in candidates))
-    top = sorted(
-        (
-            (film_id, rating)
-            for film_id, rating in zip(candidates, ratings, strict=True)
+    voted = await user_service.get_voted_ids(user_id, filters.entity_name)
+    title_batches = vod_service.iter_provider_title_ids(
+        provider_ids,
+        entity_name=filters.entity_name,
+        start_year=filters.since,
+        end_year=filters.until,
+        genre_ids=genre_ids,
+        min_votes=min_votes,
+    )
+    found: list[tuple[int, ContentRating]] = []
+
+    # search hits come in rate order, so ratings are fetched batch by batch and the scan stops early
+    async for title_ids in title_batches:
+        candidates = list(dict.fromkeys(title_id for title_id in title_ids if title_id not in voted))
+        voted.update(candidates)  # a title listed by several providers must not show up twice
+        ratings = await asyncio.gather(*(info_service.get_content_rating(title_id) for title_id in candidates))
+        found += [
+            (title_id, rating)
+            for title_id, rating in zip(candidates, ratings, strict=True)
             if rating and rating.rate and (rating.count or 0) >= min_votes
-        ),
-        key=lambda item: item[1].rate or 0,
-        reverse=True,
-    )[:limit]
+        ]
+        # ponytail: the search index rate lags the live rate (measured up to 0.012), so scan
+        # UNSEEN_BUFFER titles past the limit before resorting by live rate; raise it if order drifts
+        if len(found) >= limit + UNSEEN_BUFFER:
+            break
+
+    top = sorted(found, key=lambda item: item[1].rate or 0, reverse=True)[:limit]
 
     infos = await asyncio.gather(*(info_service.get_title_info(film_id) for film_id, _ in top))
 
     return [(info, rating) for info, (_, rating) in zip(infos, top, strict=True)]
+
+
+async def _resolve_genres(vod_service: VodService, genre_names: tuple[str, ...]) -> list[int]:
+    if not genre_names:
+        return []
+
+    polish, english = await asyncio.gather(vod_service.get_genres(), vod_service.get_genres("en_US"))
+    by_name = {str(g.id): g.id for g in polish} | {g.name.text.lower(): g.id for g in (*polish, *english)}
+
+    unknown = [name for name in genre_names if name.lower() not in by_name]
+    if unknown:
+        available = ", ".join(sorted(g.name.text for g in polish))
+        msg = f"Unknown genre: {', '.join(unknown)}. Available: {available}"
+        raise InvalidContentError(msg)
+
+    return [by_name[name.lower()] for name in genre_names]
 
 
 def _match_vod_provider(providers: list[VodProvider], vod_name: str) -> VodProvider:

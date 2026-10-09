@@ -8,7 +8,7 @@ from .console import console
 
 def print_unseen(films: list[tuple[TitleInfo, ContentRating]]) -> None:
     if not films:
-        console.print("[dim]No unseen films found.[/dim]")
+        console.print("[dim]No unseen titles found.[/dim]")
         console.print()
         return
 
