@@ -141,7 +141,7 @@ filmweb unseen fsiun --vod "Apple TV" --type serial
 
 Options:
 - `--vod`: provider name or id, required, repeat to search several providers at once
-- `--since` / `--until`: earliest / latest production year (for series Filmweb matches any year the series was on air)
+- `--since` / `--until`: earliest / latest production year (for series: the year it first aired)
 - `--genre`: Polish or English genre name, or genre id, repeat to match any of them; an unknown name lists the available genres
 - `--type`: `film` (default) or `serial`
 - `--min-votes`: minimum community votes (default 1000)

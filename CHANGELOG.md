@@ -11,6 +11,13 @@
 - **Faster unseen** - the search filters by vote count on the server, reads pages in rate order and stops once enough titles are found (Netflix since 2011: about 35 s down to 3 s)
 - **Request limit** - at most 10 requests to Filmweb run at once
 
+### Fixed
+
+- **Series years** - `--since`/`--until` for series match the first-aired year, not any year on air
+- **Login errors** - a missing, expired or broken cookie gives one clear message instead of a traceback
+- **Input checks** - `--limit` below 1, negative `--min-votes` and `--since` later than `--until` are usage errors
+- **Genre names** - matched without Polish diacritics, e.g. `kryminal`
+
 ## [1.1.0]
 
 ### Added
