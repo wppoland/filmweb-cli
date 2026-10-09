@@ -16,3 +16,7 @@ class InvalidIdTypeError(FilmwebError):
 
 class InvalidIdPrefixError(FilmwebError):
     pass
+
+
+class AuthRequiredError(FilmwebError):
+    pass

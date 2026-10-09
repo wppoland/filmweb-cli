@@ -22,3 +22,12 @@ class ContentVodProvider(BaseModel):  # not all information from api response is
 class WhereToWatch(BaseModel):
     content: ContentVodProvider
     provider: VodProvider | None = None
+
+
+class VodFilmHit(BaseModel):  # not all information from api response is parsed here
+    id: int
+
+
+class VodFilmsPage(BaseModel):
+    total: int
+    search_hits: list[VodFilmHit] = Field(default_factory=list, alias="searchHits")

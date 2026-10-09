@@ -4,7 +4,7 @@ from typing import Annotated
 from pydantic import Field, TypeAdapter
 
 from filmweb_cli.client import FilmwebClient
-from filmweb_cli.schemas.info.content_info import FilmInfo, FullDescription, GameInfo, SeriesInfo
+from filmweb_cli.schemas.info.content_info import FilmInfo, FullDescription, GameInfo, SeriesInfo, TitleInfo
 from filmweb_cli.schemas.info.people_characters_info import CharacterContentResponse, CharacterInfo, PersonInfo
 from filmweb_cli.schemas.info.rating import ContentRating, Rating
 from filmweb_cli.schemas.info.worlds import WorldInfo
@@ -125,3 +125,10 @@ class InfoService(BaseService):
         self._validate_response(world_response, world_id)
 
         return WorldInfo.model_validate(world_response.json())
+
+    async def get_title_info(self, content_id: int) -> TitleInfo:
+        title_response = await self.client.get(f"/title/{content_id}/info")
+
+        self._validate_response(title_response, content_id)
+
+        return TitleInfo.model_validate(title_response.json())

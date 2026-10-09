@@ -29,7 +29,7 @@ pip install -e .
 
 ## Usage
 
-The `filmweb` command provides three main subcommands: `search`, `info`, and `vod`.
+The `filmweb` command provides the subcommands `search`, `info`, `vod`, `top`, and `unseen`.
 
 ### Interactive Mode with fzf
 
@@ -123,6 +123,26 @@ filmweb top 10094250
 ```
 
 ![Top roles image](.media/top_roles.png)
+
+### Unseen Films
+
+Find well-rated films on a VOD platform that a Filmweb user has not rated yet:
+
+```bash
+# Apple TV films produced since 2011, at least 1000 community votes, top 20
+filmweb unseen fsiun --vod "Apple TV" --since 2011
+```
+
+Options: `--vod` (provider name or id, required), `--since` (earliest production year),
+`--min-votes` (default 1000), `--limit` (default 20).
+
+Filmweb returns only the first 100 votes of a user without a login. For accounts with more votes,
+set `FILMWEB_COOKIE` to the `JWT` cookie of a logged-in browser session (DevTools, Application, Cookies).
+The JWT expires after about an hour.
+
+```bash
+export FILMWEB_COOKIE='JWT=...'
+```
 
 ## Requirements
 

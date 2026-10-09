@@ -1,3 +1,10 @@
+## [Unreleased]
+
+### Added
+
+- **Unseen films** - `filmweb unseen USER --vod PROVIDER` lists top-rated films on a VOD platform that the user has not rated, with `--since`, `--min-votes` and `--limit` filters
+- **Logged-in session** - optional `FILMWEB_COOKIE` env var, needed to read more than 100 user votes
+
 ## [1.1.0]
 
 ### Added
